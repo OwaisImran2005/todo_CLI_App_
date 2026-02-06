@@ -1,154 +1,176 @@
 /**
- * ChatInterface Component
+ * Authentication Context
  *
- * Main chat container with header, message list, input area, and smart auto-scroll
+ * Provides authentication state and methods throughout the application
  */
 
-"use client";
+'use client';
 
-import { useChat } from '@/lib/hooks/use-chat-hook';
-import { useAuth } from "@/contexts/AuthContext";
-import { useRouter } from "next/navigation";
-import { useRef, useEffect, useState } from "react";
-import ChatMessage from "./ChatMessage";
-import ChatInput from "./ChatInput";
-import TypingIndicator from "./TypingIndicator";
-import EmptyChat from "./EmptyChat";
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
+import { AuthContextValue, User, LoginCredentials, SignupData } from '@/types/auth';
+import { signIn, signUp, signOut, getSession } from '@/lib/auth';
+import toast from 'react-hot-toast';
 
-export default function ChatInterface() {
-  const {
-    messages,
-    conversationId,
-    isLoading,
-    error,
-    sendMessage,
-    startNewConversation,
-    clearError,
-  } = useChat();
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-  const { logout } = useAuth();
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+  // Check for existing session on mount
+  useEffect(() => {
+    const checkSession = async () => {
+      console.log('[AuthContext] Checking session...');
+      try {
+        // Try to get token from localStorage first, then from cookies
+        let storedToken = localStorage.getItem('token');
+        console.log('[AuthContext] Token from localStorage:', storedToken ? 'Found' : 'Not found');
+        
+        if (!storedToken) {
+          // Check cookies as fallback
+          const cookies = document.cookie.split(';');
+          const tokenCookie = cookies.find(c => c.trim().startsWith('token='));
+          if (tokenCookie) {
+            storedToken = tokenCookie.split('=')[1];
+            console.log('[AuthContext] Token from cookie:', 'Found');
+            // Sync to localStorage
+            localStorage.setItem('token', storedToken);
+          }
+        }
 
-  // Detect user scroll position
-  const handleScroll = () => {
-    if (!messagesContainerRef.current) return;
+        if (storedToken) {
+          console.log('[AuthContext] Fetching session from API...');
+          const session = await getSession();
+          if (session) {
+            console.log('[AuthContext] Session restored:', session.user);
+            setUser(session.user);
+            setToken(session.token);
+            setIsAuthenticated(true);
+          } else {
+            console.log('[AuthContext] Session fetch returned null');
+          }
+        } else {
+          console.log('[AuthContext] No token found');
+        }
+      } catch (error) {
+        console.error('[AuthContext] Session check failed:', error);
+      } finally {
+        setIsLoading(false);
+        console.log('[AuthContext] Session check complete');
+      }
+    };
 
-    const { scrollTop, scrollHeight, clientHeight } =
-      messagesContainerRef.current;
-    const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+    checkSession();
+  }, []);
 
-    setShouldAutoScroll(isNearBottom);
+  // Login function
+  const login = async (credentials: LoginCredentials) => {
+    try {
+      setIsLoading(true);
+      const response = await signIn(credentials.email, credentials.password);
+
+      // Store token in localStorage
+      const accessToken = response.access_token;
+      localStorage.setItem('token', accessToken);
+
+      // Also store token in cookie for middleware
+      document.cookie = `token=${accessToken}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+
+      // Update state
+      setToken(accessToken);
+      setUser(response.user);
+      setIsAuthenticated(true);
+
+      toast.success('Login successful!');
+      
+      // Use window.location for hard navigation to ensure middleware sees the cookie
+      window.location.href = '/dashboard';
+    } catch (error: any) {
+      toast.error(error.message || 'Login failed');
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  // Smart auto-scroll: scroll to bottom only when user is near bottom
-  useEffect(() => {
-    if (shouldAutoScroll) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  // Signup function
+  const signup = async (data: SignupData) => {
+    try {
+      setIsLoading(true);
+
+      // Validate password match
+      if (data.password !== data.confirmPassword) {
+        throw new Error('Passwords do not match');
+      }
+
+      const response = await signUp(data.email, data.password, data.username);
+
+      // Auto-login after signup
+      const accessToken = response.access_token;
+      localStorage.setItem('token', accessToken);
+
+      // Also store token in cookie for middleware
+      document.cookie = `token=${accessToken}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+
+      // Update state
+      setToken(accessToken);
+      setUser(response.user);
+      setIsAuthenticated(true);
+
+      toast.success('Account created successfully!');
+      
+      // Use window.location for hard navigation to ensure middleware sees the cookie
+      window.location.href = '/dashboard';
+    } catch (error: any) {
+      toast.error(error.message || 'Signup failed');
+      throw error;
+    } finally {
+      setIsLoading(false);
     }
-  }, [messages, shouldAutoScroll]);
+  };
 
-  return (
-    <div className="flex flex-col h-screen max-w-4xl mx-auto">
-      {/* Header */}
-      <header
-        className="bg-white border-b border-gray-200 px-4 py-3 sm:px-6"
-        role="banner"
-      >
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">
-              AI Assistant
-            </h1>
-            <p
-              className="text-sm text-gray-500"
-              role="status"
-              aria-live="polite"
-            >
-              {conversationId
-                ? `Conversation #${conversationId}`
-                : "New conversation"}
-            </p>
-          </div>
-          <nav className="flex items-center gap-3" aria-label="Chat navigation">
-            <button
-              onClick={() => router.push("/dashboard")}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              aria-label="Switch to list view"
-            >
-              📋 List View
-            </button>
-            <button
-              onClick={startNewConversation}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              aria-label="Start new conversation"
-            >
-              New Chat
-            </button>
-            <button
-              onClick={logout}
-              className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-              aria-label="Logout"
-            >
-              Logout
-            </button>
-          </nav>
-        </div>
-      </header>
+  // Logout function
+  const logout = async () => {
+    try {
+      await signOut();
 
-      {/* Messages Area */}
-      <div
-        ref={messagesContainerRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 py-6 sm:px-6"
-        role="main"
-        aria-label="Chat messages"
-      >
-        {messages.length === 0 ? (
-          <EmptyChat onSendMessage={sendMessage} />
-        ) : (
-          <div
-            className="space-y-4"
-            role="log"
-            aria-live="polite"
-            aria-atomic="false"
-          >
-            {messages.map((message, index) => (
-              <ChatMessage key={message.id || index} message={message} />
-            ))}
-            {isLoading && <TypingIndicator />}
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
+      // Clear state
+      setUser(null);
+      setToken(null);
+      setIsAuthenticated(false);
 
-      {/* Error Display */}
-      {error && (
-        <div
-          className="px-4 py-3 bg-red-50 border-t border-red-200 sm:px-6"
-          role="alert"
-          aria-live="assertive"
-        >
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-red-800">{error}</p>
-            <button
-              onClick={clearError}
-              className="text-sm font-medium text-red-600 hover:text-red-500"
-              aria-label="Dismiss error message"
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
+      // Clear cookie
+      document.cookie = 'token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
 
-      {/* Input Area */}
-      <div className="bg-white border-t border-gray-200 px-4 py-4 sm:px-6">
-        <ChatInput onSendMessage={sendMessage} disabled={isLoading} />
-      </div>
-    </div>
-  );
+      toast.success('Logged out successfully');
+      router.push('/login');
+    } catch (error: any) {
+      toast.error('Logout failed');
+      console.error('Logout error:', error);
+    }
+  };
+
+  const value: AuthContextValue = {
+    user,
+    token,
+    isAuthenticated,
+    isLoading,
+    login,
+    signup,
+    logout,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 }

@@ -9,7 +9,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthContextValue, User, LoginCredentials, SignupData } from '@/types/auth';
-import { signIn, signUp, signOut, getSession } from '@/lib/auth-service';
+import { signIn, signUp, signOut, getSession } from '@/lib/auth';
 import toast from 'react-hot-toast';
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
