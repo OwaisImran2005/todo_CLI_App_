@@ -6,7 +6,7 @@
 
 "use client";
 
-import { useChat } from "@/lib/hooks/useChat";
+import { useChat } from '@/lib/hooks/use-chat-hook';
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { useRef, useEffect, useState } from "react";
